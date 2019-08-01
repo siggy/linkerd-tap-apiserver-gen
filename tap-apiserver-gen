@@ -1,0 +1,59 @@
+#!/bin/bash
+
+set -eu
+
+linkerd_dir=$GOPATH/src/github.com/linkerd/linkerd2
+
+if [ -d $linkerd_dir ]
+then
+    echo "${linkerd_dir} already exists, exiting"
+    exit 1
+fi
+
+builder_version=v1.12.alpha.4
+kubebuilder_version=2.0.0-beta.0
+
+rootdir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+os=$(go env GOOS)
+arch=$(go env GOARCH)
+
+mkdir -p ${rootdir}/.tap-apiserver-gen/apiserver-builder
+
+echo 'Downloading apiserver-builder...'
+curl -sL https://github.com/kubernetes-incubator/apiserver-builder-alpha/releases/download/${builder_version}/apiserver-builder-alpha-${builder_version}-${os}-${arch}.tar.gz | tar -xz -C ${rootdir}/.tap-apiserver-gen/apiserver-builder
+apiserver_boot=${rootdir}/.tap-apiserver-gen/apiserver-builder/bin/apiserver-boot
+
+echo 'Downloading kubebuilder...'
+curl -sL https://go.kubebuilder.io/dl/${kubebuilder_version}/${os}/${arch} | tar -xz -C ${rootdir}/.tap-apiserver-gen
+export PATH=$PATH:${rootdir}/.tap-apiserver-gen/kubebuilder_${kubebuilder_version}_${os}_${arch}/bin
+
+mkdir -p $linkerd_dir
+cd $linkerd_dir
+
+echo 'Generating repo...'
+
+cat << EOF > $linkerd_dir/boilerplate.go.txt
+/*
+Copyright YEAR The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+EOF
+
+${apiserver_boot} init repo --domain linkerd.io
+${apiserver_boot} create group version resource --group tap --version v1alpha1 --kind Tap --resource deployments
+${apiserver_boot} create subresource --subresource tap --group tap --version v1alpha1 --kind Tap --resource deployments
+
+echo 'Booting server...'
+${apiserver_boot} run local
